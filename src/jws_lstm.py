@@ -97,9 +97,15 @@ def init_model(vocab_size, char_type_size):
         o_gate=F.Linear(window * (embed_units + char_type_embed_units)*2 + hidden_units, hidden_units),
         output=F.Linear(hidden_units, label_num),
     )
-    #opt = optimizers.AdaGrad(lr=learning_rate)
-    #opt = optimizers.SGD()
-    opt = optimizers.Adam()
+    if opt_selection == 'Adagrad':
+        opt = optimizers.AdaGrad(lr=learning_rate)
+    elif opt_selection == 'SGD':
+        opt = optimizers.SGD()
+    elif opt_selection == 'Adam':
+        opt = optimizers.Adam()
+    else:
+        opt = optimizers.AdaGrad(lr=learning_rate)
+        print('Adagrad is chosen as defaut')
     opt.setup(model)
     return model, opt
 
@@ -209,14 +215,14 @@ def forward_one(x, target, label, hidden, prev_c, train_flag):
         char_id = char2id[char]
         char_vec = model.embed(get_onehot(char_id))
         char_vecs.append(char_vec)
-        bi_gram = x[target+2+i-1] + x[target+2+i]
+        bi_gram = x[target+2+i] + x[target+2+i+1]
         bi_gram_id = char2id[bi_gram]
         bi_gram_char_vec = model.embed(get_onehot(bi_gram_id))
         char_vecs.append(bi_gram_char_vec)
     char_concat = F.concat(tuple(char_vecs))
     for i in range(-distance, distance+1):
         char = x[target+2+ i]
-        pre_char = x[target+2+ i - 1]
+        pre_char = x[target+2+ i + 1]
         char_type = make_char_type(char)
         pre_char_type = make_char_type(pre_char)
         bi_gram_type = pre_char_type + char_type
@@ -329,12 +335,12 @@ if __name__ == '__main__':
     dropout_rate = float(ini.get('Parameters', 'dropout_rate'))
     n_epoch = int(ini.get('Settings', 'n_epoch'))
     delta = float(ini.get('Parameters', 'delta'))
+    opt_selection = ini.get('Settings', 'opt_selection')
     with open(config_file, 'w') as config:
         ini.write(config)
 
     char2id = make_vocab()
     char_type2id = make_char_type2id()
-    print(len(char_type2id))
     model, opt = init_model(len(char2id), len(char_type2id))
     train(char2id, model, opt)
     #test(char2id, model)
