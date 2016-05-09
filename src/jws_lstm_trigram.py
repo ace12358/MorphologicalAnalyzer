@@ -36,22 +36,20 @@ def make_vocab():
     vocab = dict()
     for f in [train_file, test_file]:
         for line in open(f):
-            pre_char = '<s>'
-            for char in ''.join(line.strip().split()):
-                bi_gram = pre_char + char
-                if char not in vocab:
-                    vocab[char] = len(vocab)
+            sent = list(''.join(line.rstrip().split(' ')))
+            for i in range(window//2 + 3-1):
+                sent.append('</s>')
+                sent.insert(0,'<s>')
+            for i in range(3-1, len(sent)-(3-1)+2):
+                uni_gram = sent[i]
+                bi_gram = sent[i-1] + sent[i]
+                tri_gram = sent[i-2] + sent[i-1] + sent[i]
+                if uni_gram not in vocab:
+                    vocab[uni_gram] = len(vocab)
                 if bi_gram not in vocab:
                     vocab[bi_gram] = len(vocab)
-                pre_char = char
-            bi_gram = char + '</s>'
-            if bi_gram not in vocab:
-                vocab[bi_gram] = len(vocab)
-    vocab['<s>'] = len(vocab)
-    vocab['</s>'] = len(vocab)
-    vocab['<s><s>'] = len(vocab)
-    vocab['</s></s>'] = len(vocab)
-    
+                if tri_gram not in vocab:
+                   vocab[tri_gram] = len(vocab)
     return vocab
 
 def make_char_type(char):
@@ -82,19 +80,21 @@ def make_char_type2id():
     char_type2id['other'] = len(char_type2id)
     char_type2id['<s>'] = len(char_type2id)
     char_type2id['</s>'] = len(char_type2id)
-    for pre in ['hiragana','katakana','kanji','alphabet','number','other','<s>','</s>']:
-        for cur in ['hiragana','katakana','kanji','alphabet','number','other','<s>','</s>']:
-            char_type2id[pre+cur] = len(char_type2id)
+    for one in ['hiragana','katakana','kanji','alphabet','number','other','<s>','</s>']:
+        for two in ['hiragana','katakana','kanji','alphabet','number','other','<s>','</s>']:
+            char_type2id[one+two] = len(char_type2id)
+            for three in ['hiragana','katakana','kanji','alphabet','number','other','<s>','</s>']:
+                char_type2id[one+two+three] = len(char_type2id)
     return char_type2id
 
 def init_model(vocab_size, char_type_size):
     model = FunctionSet(
         embed=F.EmbedID(vocab_size, embed_units),
         char_type_embed = F.EmbedID(char_type_size, char_type_embed_units),
-        hidden1=F.Linear(window * (embed_units + char_type_embed_units)*2 + hidden_units, hidden_units),
-        i_gate=F.Linear(window * (embed_units + char_type_embed_units)*2 + hidden_units, hidden_units),
-        f_gate=F.Linear(window * (embed_units + char_type_embed_units)*2 + hidden_units, hidden_units),
-        o_gate=F.Linear(window * (embed_units + char_type_embed_units)*2 + hidden_units, hidden_units),
+        hidden1=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
+        i_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
+        f_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
+        o_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
         output=F.Linear(hidden_units, label_num),
     )
     if opt_selection == 'Adagrad':
@@ -177,8 +177,6 @@ def train(char2id, model, optimizer):
                 label = t[target]
                 pred, loss = forward_one(x, target, label, hidden, prev_c, train_flag=True)
                 accum_loss += loss
-                #print('loss:',loss.data)
-            #print('accum loss', accum_loss.data)
             batch_count += 1
             if batch_count == batch_size:
                 optimizer.zero_grads()
@@ -201,37 +199,52 @@ def train(char2id, model, optimizer):
 
 def forward_one(x, target, label, hidden, prev_c, train_flag):
     # make input window vector
-    distance = window // 2
+    distance =  window // 2
+    s_num = 3-1 + window // 2
     char_vecs = list()
     char_type_vecs = list()
     x = list(x)
-    for i in range(distance):
-        x.append('</s>')
+    for i in range(s_num):
         x.append('</s>')
         x.insert(0,'<s>')
-        x.insert(0,'<s>')
-    for i in range(-distance , distance+1):
-        char = x[target+2 + i]
-        char_id = char2id[char]
-        char_vec = model.embed(get_onehot(char_id))
-        char_vecs.append(char_vec)
-        bi_gram = x[target+2+i] + x[target+2+i+1]
-        bi_gram_id = char2id[bi_gram]
-        bi_gram_char_vec = model.embed(get_onehot(bi_gram_id))
-        char_vecs.append(bi_gram_char_vec)
-    char_concat = F.concat(tuple(char_vecs))
     for i in range(-distance, distance+1):
-        char = x[target+2+ i]
-        pre_char = x[target+2+ i + 1]
-        char_type = make_char_type(char)
-        pre_char_type = make_char_type(pre_char)
-        bi_gram_type = pre_char_type + char_type
-        char_type_id = char_type2id[char_type]
-        bigram_type_id = char_type2id[bi_gram_type]
-        char_type_vec = model.char_type_embed(get_onehot(char_type_id))
-        bigram_type_vec = model.char_type_embed(get_onehot(bigram_type_id))
-        char_type_vecs.append(char_type_vec)
-        char_type_vecs.append(bigram_type_vec)
+
+    # make char vector 
+        # import char
+        uni_gram = x[target+s_num+i]
+        bi_gram = x[target+s_num-1+i] + x[target+s_num+i]
+        tri_gram = x[target+s_num-2+i] + x[target+s_num-1+i] + x[target+s_num+i]
+        # char2id
+        uni_gram_id = char2id[uni_gram]
+        bi_gram_id = char2id[bi_gram]
+        tri_gram_id = char2id[tri_gram]
+        # id 2 embedding
+        uni_gram_vec = model.embed(get_onehot(uni_gram_id))
+        bi_gram_vec = model.embed(get_onehot(bi_gram_id))
+        tri_gram_vec = model.embed(get_onehot(tri_gram_id))
+        # add all char_vec
+        char_vecs.append(uni_gram_vec)
+        char_vecs.append(bi_gram_vec)
+        char_vecs.append(tri_gram_vec)
+    # make char type vector 
+        # import char type
+        uni_gram_type = make_char_type(uni_gram)
+        bi_gram_type = make_char_type(x[target+s_num-1+i]) + make_char_type(x[target+s_num+i])
+        tri_gram_type = make_char_type(x[target+s_num-2+i]) + make_char_type(x[target+s_num+i] + make_char_type(x[target+s_num-2+i]))
+        # chartype 2 id
+        uni_gram_type_id = char_type2id[uni_gram_type]
+        bi_gram_type_id =  char_type2id[bi_gram_type]
+        tri_gram_type_id = char_type2id[tri_gram_type]
+        # id 2 embedding
+        uni_gram_type_vec = model.char_type_embed(get_onehot(uni_gram_type_id))
+        bi_gram_type_vec = model.char_type_embed(get_onehot(bi_gram_type_id))
+        tri_gram_type_vec = model.char_type_embed(get_onehot(tri_gram_type_id))
+        # add all char_type_vec
+        char_type_vecs.append(uni_gram_type_vec)
+        char_type_vecs.append(bi_gram_type_vec)
+        char_type_vecs.append(tri_gram_type_vec)
+
+    char_concat = F.concat(tuple(char_vecs))
     char_type_concat = F.concat(tuple(char_type_vecs))
     #dropout_concat = F.dropout(concat, ratio=dropout_rate, train=train_flag)
     concat = F.concat((char_concat, char_type_concat))
