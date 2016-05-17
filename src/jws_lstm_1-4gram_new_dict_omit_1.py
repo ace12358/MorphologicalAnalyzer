@@ -57,7 +57,10 @@ def make_word_dict():
     #for f in [train_file, test_file]:
     for f in [train_file]:
         for line in open(f):
-            words += (line.rstrip().split(' '))
+            ws = (line.rstrip().split(' '))
+            for w in ws:
+                if len(w) > 1:
+                    words.append(w)
     words = set(words)
     return words
 
@@ -100,12 +103,12 @@ def init_model(vocab_size, char_type_size):
     model = FunctionSet(
         embed=F.EmbedID(vocab_size, embed_units),
         char_type_embed = F.EmbedID(char_type_size, char_type_embed_units),
-        dict_embed = F.Linear(12, dict_embed_units),
-        hidden1=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units + dict_embed_units, hidden_units),
-        i_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units + dict_embed_units, hidden_units),
-        f_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units + dict_embed_units, hidden_units),
-        o_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units + dict_embed_units, hidden_units),
-        output=F.Linear(hidden_units, label_num),
+        #dict_embed = F.Linear(12, dict_embed_units),
+        hidden1=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
+        i_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
+        f_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
+        o_gate=F.Linear(window * (embed_units + char_type_embed_units)*3 + hidden_units, hidden_units),
+        output=F.Linear(hidden_units + 12, label_num),
     )
     if opt_selection == 'Adagrad':
         opt = optimizers.AdaGrad(lr=learning_rate)
@@ -252,7 +255,7 @@ def forward_one(x, target, label, hidden, prev_c, word_dict, train_flag):
                 else:
                     I4 = 1
     dict_vec = chainer.Variable(np.array([[L1,L2,L3,L4,R1,R2,R3,R4,I1,I2,I3,I4]], dtype=np.float32))
-    dict_embed_vec = model.dict_embed(dict_vec)
+    # dict_embed_vec = model.dict_embed(dict_vec)
     # make input window vector
     distance =  window // 2
     s_num = 3-1 + window // 2
@@ -302,14 +305,14 @@ def forward_one(x, target, label, hidden, prev_c, word_dict, train_flag):
     char_concat = F.concat(tuple(char_vecs))
     char_type_concat = F.concat(tuple(char_type_vecs))
     #dropout_concat = F.dropout(concat, ratio=dropout_rate, train=train_flag)
-    concat = F.concat((char_concat, char_type_concat, dict_embed_vec))
+    concat = F.concat((char_concat, char_type_concat))
     concat = F.concat((concat, hidden))
     i_gate = F.sigmoid(model.i_gate(concat))
     f_gate = F.sigmoid(model.f_gate(concat))
     o_gate = F.sigmoid(model.o_gate(concat))
     concat = F.concat((hidden, i_gate, f_gate, o_gate))
     prev_c, hidden = F.lstm(prev_c, concat)
-    output = model.output(hidden)
+    output = model.output(F.concat((hidden, dict_vec)))
     dist = F.softmax(output)
     #print(dist.data, label, np.argmax(dist.data))
     correct = get_onehot(label)
